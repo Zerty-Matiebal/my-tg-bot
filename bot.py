@@ -3,6 +3,13 @@ from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import os
 import asyncio
 import sys
+
+# РЕШЕНИЕ БАГА С PROXIES: Полностью очищаем переменные прокси для Render
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
+os.environ.pop("http_proxy", None)
+os.environ.pop("https_proxy", None)
+
 from aiohttp import web
 from groq import Groq
 
@@ -12,7 +19,7 @@ GROQ_KEY = os.getenv("GROQ_API_KEY")
 # Функция запроса к ИИ Groq
 async def ask_ai(user_message: str) -> str:
     try:
-        # Инициализируем клиент напрямую внутри функции, чтобы избежать бага с proxies
+        # Инициализируем клиент напрямую
         client = Groq(api_key=GROQ_KEY)
         
         chat_completion = client.chat.completions.create(
