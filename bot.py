@@ -16,7 +16,8 @@ async def ask_ai(user_message: str) -> str:
         "Content-Type": "application/json"
     }
     data = {
-        "model": "llama3-8b-8192",
+        # Заменили старую отключенную модель на новую и рабочую
+        "model": "llama-3.1-8b-instant",
         "messages": [
             {
                 "role": "system",
