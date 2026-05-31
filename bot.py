@@ -8,7 +8,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 # Функция ответа в Telegram
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я работаю.")
+    await update.message.reply_text("Никита, иди нахуй")
 
 # Крошечный веб-сервер для обмана Render
 async def handle(request):
