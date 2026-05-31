@@ -2,22 +2,23 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import os
 import asyncio
+import sys
 from aiohttp import web
 from groq import Groq
 
+# Берем токены из переменных окружения Render
 TOKEN = os.getenv("BOT_TOKEN")
-# Подключаем ИИ-клиент
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_KEY = os.getenv("GROQ_API_KEY")
 
-# Функция запроса к искусственному интеллекту
+# Функция запроса к ИИ Groq
 async def ask_ai(user_message: str) -> str:
     try:
-        # Используем быструю и умную модель Llama 3
-        chat_completion = groq_client.chat.completions.create(
+        client = Groq(api_key=GROQ_KEY)
+        chat_completion = client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": "Ты — умный, веселый и дружелюбный ИИ-ассистент в чате. Отвечай кратко, емко и по делу."
+                    "content": "Ты — умный и дружелюбный ИИ-ассистент в чате. Отвечай кратко, емко и по делу."
                 },
                 {
                     "role": "user",
@@ -28,27 +29,36 @@ async def ask_ai(user_message: str) -> str:
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
-        print(f"Ошибка ИИ: {e}")
-        return "Извини, у меня перегружен мыслительный процессор. Попробуй позже!"
+        print(f"Ошибка при запросе к ИИ: {e}", flush=True)
+        return "Извини, не смог обработать запрос к ИИ."
 
-# Функция ответа в Telegram
+# Функция ответа на сообщения в Telegram
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+    
     user_text = update.message.text
-    
-    # Отправляем эффект "бот печатает..."
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    
-    # Получаем ответ от ИИ
-    ai_response = await ask_ai(user_text)
-    
-    # Отвечаем пользователю
-    await update.message.reply_text(ai_response)
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        ai_response = await ask_ai(user_text)
+        await update.message.reply_text(ai_response)
+    except Exception as e:
+        print(f"Ошибка отправки сообщения: {e}", flush=True)
 
-# Крошечный веб-сервер для обмана Render
+# Веб-сервер для прохождения проверки портов Render
 async def handle(request):
     return web.Response(text="Бот активен!")
 
-async def start_web_server():
+async def main():
+    print("Проверка токенов...", flush=True)
+    if not TOKEN:
+        print("ОШИБКА: Переменная BOT_TOKEN пуста!", file=sys.stderr, flush=True)
+        return
+    if not GROQ_KEY:
+        print("ОШИБКА: Переменная GROQ_API_KEY пуста!", file=sys.stderr, flush=True)
+        return
+
+    # Запуск фонового веб-сервера
     app_web = web.Application()
     app_web.router.add_get('/', handle)
     runner = web.AppRunner(app_web)
@@ -56,22 +66,25 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print("Веб-сервер запущен.")
+    print(f"Веб-сервер успешно запущен на порту {port}", flush=True)
 
-async def main():
-    await start_web_server()
-
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
+    # Настройка и запуск Telegram-бота
+    print("Инициализация Telegram-бота...", flush=True)
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
     
-    async with app:
-        await app.initialize()
-        await app.start()
-        print("Бот с ИИ успешно запущен!")
-        await app.updater.start_polling()
-        
-        while True:
-            await asyncio.sleep(1)
+    # Запуск в режиме бесконечного цикла (Polling)
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    print("Бот успешно запущен и готов к работе!", flush=True)
+    
+    # Поддерживаем работу процесса
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as main_error:
+        print(f"КРИТИЧЕСКАЯ ОШИБКА ЗАПУСКА: {main_error}", file=sys.stderr, flush=True)
