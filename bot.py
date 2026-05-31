@@ -1,15 +1,14 @@
+# ЭТИ СТРОЧКИ ДОЛЖНЫ БЫТЬ САМЫМИ ПЕРВЫМИ В ФАЙЛЕ (ДО ЛЮБЫХ ИМПОРТОВ!)
+import os
+os.environ["HTTP_PROXY"] = ""
+os.environ["HTTPS_PROXY"] = ""
+os.environ["http_proxy"] = ""
+os.environ["https_proxy"] = ""
+
+import sys
+import asyncio
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
-import os
-import asyncio
-import sys
-
-# РЕШЕНИЕ БАГА С PROXIES: Полностью очищаем переменные прокси для Render
-os.environ.pop("HTTP_PROXY", None)
-os.environ.pop("HTTPS_PROXY", None)
-os.environ.pop("http_proxy", None)
-os.environ.pop("https_proxy", None)
-
 from aiohttp import web
 from groq import Groq
 
@@ -19,8 +18,10 @@ GROQ_KEY = os.getenv("GROQ_API_KEY")
 # Функция запроса к ИИ Groq
 async def ask_ai(user_message: str) -> str:
     try:
-        # Инициализируем клиент напрямую
-        client = Groq(api_key=GROQ_KEY)
+        # Принудительно передаем пустой клиент httpx без прокси внутри Groq
+        import httpx
+        custom_client = httpx.Client(proxy=None)
+        client = Groq(api_key=GROQ_KEY, http_client=custom_client)
         
         chat_completion = client.chat.completions.create(
             messages=[
