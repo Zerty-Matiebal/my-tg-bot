@@ -2,75 +2,73 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import os
 import asyncio
-import sys
-from aiohttp import web, ClientSession
+from aiohttp import web
 
 TOKEN = os.getenv("BOT_TOKEN")
-GROQ_KEY = os.getenv("GROQ_API_KEY")
 
-# Прямой запрос к ИИ
-async def ask_ai(user_message: str) -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [
-            {
-                "role": "system",
-                "content": "Ты — умный, вежливый и краткий ИИ-ассистент. Отвечаешь от имени владельца аккаунта. Пиши емко и по делу."
-            },
-            {
-                "role": "user",
-                "content": user_message
-            }
-        ]
-    }
-    try:
-        async with ClientSession(trust_env=False) as session:
-            async with session.post(url, json=data, headers=headers) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    return result["choices"][0]["message"]["content"]
-                else:
-                    return "Извини, я временно завис."
-    except Exception as e:
-        print(f"Ошибка ИИ: {e}", flush=True)
-        return "Извини, не смог связаться с ИИ."
+# Текст твоего автоответчика
+AUTO_REPLY_TEXT = "Никитка я сейчас занят более важным делом, отвечу на твоё тупое сообщение так быстро как смогу, а пока иди нахуй. С любовью❤️❤️❤️. Дениску это тоже касается"
 
-# Обработчик для ОБЫЧНЫХ сообщений (в чате с ботом)
-async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-    user_text = update.message.text
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    ai_response = await ask_ai(user_text)
-    await update.message.reply_text(ai_response)
+# Время ожидания твоего ответа (в секундах). 180 секунд = 3 минуты
+WAIT_TIME = 120
 
-# ОБРАБОТЧИК ДЛЯ TELEGRAM BUSINESS (Личные переписки)
+# Словарь для отслеживания активных таймеров ожидания по каждому чату
+active_tasks = {}
+
+# Обработчик для личных бизнес-переписок
 async def reply_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.business_message or not update.business_message.text:
+    if not update.business_message:
         return
     
-    # Проверяем, что сообщение пришло ОТ ДРУГОГО человека, а не от тебя самого
-    if update.business_message.from_user.id == update.effective_user.id:
+    chat_id = update.effective_chat.id
+    user_id = update.business_message.from_user.id
+    my_id = update.effective_user.id  # Твой собственный ID
+
+    # ЕСЛИ НАПИСАЛ ТЫ САМ: значит ты в сети и ответил человеку!
+    if user_id == my_id:
+        if chat_id in active_tasks:
+            # Отменяем автоответ бота, так как ты уже общаешься в этом чате
+            active_tasks[chat_id].cancel()
+            del active_tasks[chat_id]
+            print(f"Ты ответил в чате {chat_id}. Автоответ отменен.", flush=True)
         return
 
-    user_text = update.business_message.text
-    
-    # Отправляем ИИ-ответ прямо в личную переписку
-    ai_response = await ask_ai(user_text)
-    await update.business_message.reply_text(ai_response)
+    # ЕСЛИ НАПИСАЛ КТО-ТО ДРУГОЙ (Входящее сообщение):
+    # Если для этого чата уже тикает таймер, сбрасываем старый и ставим новый (чтобы отсчет шел от последнего сообщения)
+    if chat_id in active_tasks:
+        active_tasks[chat_id].cancel()
 
-# Веб-сервер для заглушки Render
+    # Запускаем фоновую задачу ожидания
+    task = asyncio.create_task(wait_and_reply(update, chat_id))
+    active_tasks[chat_id] = task
+
+# Функция, которая ждет и проверяет, нужно ли отвечать
+async def wait_and_reply(update: Update, chat_id: int):
+    try:
+        # Ждем 3 минуты
+        await asyncio.sleep(WAIT_TIME)
+        
+        # Если время прошло и задачу никто не отменил — значит ты не ответил. Отправляем текст!
+        await update.business_message.reply_text(AUTO_REPLY_TEXT)
+        print(f"Отправлен автоответ в чат {chat_id}, так как владелец не в сети.", flush=True)
+        
+        # Удаляем задачу из активных, так как она выполнена
+        if chat_id in active_tasks:
+            del active_tasks[chat_id]
+            
+    except asyncio.CancelledError:
+        # Сюда код попадает, если задача была успешно отменена твоим ответом
+        pass
+    except Exception as e:
+        print(f"Ошибка в таймере автоответа: {e}", flush=True)
+
+# Заглушка веб-сервера для Render
 async def handle(request):
-    return web.Response(text="Бот активен!")
+    return web.Response(text="Умный автоответчик активен!")
 
 async def main():
-    if not TOKEN or not GROQ_KEY:
-        print("КРИТИЧЕСКАЯ ОШИБКА: Токены не заполнены!", file=sys.stderr, flush=True)
+    if not TOKEN:
+        print("ОШИБКА: BOT_TOKEN не задан!", flush=True)
         return
 
     app_web = web.Application()
@@ -80,25 +78,18 @@ async def main():
     port = int(os.environ.get("PORT", 10000))
     await web.TCPSite(runner, '0.0.0.0', port).start()
 
-    # Старт бота
     application = Application.builder().token(TOKEN).build()
     
-    # Слушаем обычные сообщения
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
-    
-    # Слушаем бизнес-сообщения в личке!
+    # Отслеживаем все текстовые сообщения в бизнес-чатах (и твои, и чужие)
     application.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGES & filters.TEXT, reply_business))
     
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
-    print("Бот успешно запущен с поддержкой Telegram Business!", flush=True)
+    print("Умный автоответчик успешно запущен!", flush=True)
     
     while True:
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as main_error:
-        print(f"Ошибка цикла: {main_error}", file=sys.stderr, flush=True)
+    asyncio.run(main())
